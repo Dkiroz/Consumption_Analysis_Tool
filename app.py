@@ -620,7 +620,7 @@ with st.sidebar:
         "⚡  AMI Analysis",
     ], label_visibility="collapsed")
     st.markdown("---")
-    st.caption("GRU Energy & Water Savings Plan")
+    st.caption("Daniel Quiroz")
     st.caption("Built for the Energy Audit Team")
 
 
