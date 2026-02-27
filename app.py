@@ -500,13 +500,17 @@ def get_meter_changes(df):
 
 
 def add_markers(ax, df):
-  add_markers(ax, df):
+    # Move-In (reason 6) — solid cyan vertical line + rotated label
     move_ins    = df[df["mr_reason"] == 6]
     first_label = True
     for _, row in move_ins.iterrows():
         lbl = "Move-In" if first_label else "_nolegend_"
-        ax.axvline(x=row["mr_date"], color="dodgerblue",
-                   linewidth=1.8, linestyle="--", alpha=0.9, label=lbl)
+        ax.axvline(x=row["mr_date"], color="#00cfff",
+                   linewidth=2.5, linestyle="-", alpha=1.0, label=lbl, zorder=5)
+        ymin, ymax = ax.get_ylim()
+        ax.text(row["mr_date"], ymax * 0.95, "Move-In",
+                color="#00cfff", fontsize=7, ha="center", va="top", rotation=90, zorder=6,
+                bbox=dict(boxstyle="round,pad=0.1", fc=BG_CARD, ec="#00cfff", alpha=0.8))
         first_label = False
 
     changes     = get_meter_changes(df)
