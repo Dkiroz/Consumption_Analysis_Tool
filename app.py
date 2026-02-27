@@ -499,7 +499,7 @@ def get_meter_changes(df):
     return changes
 
 
-def add_markers:     
+def add_markers(ax, df):
   add_markers(ax, df):
     move_ins    = df[df["mr_reason"] == 6]
     first_label = True
