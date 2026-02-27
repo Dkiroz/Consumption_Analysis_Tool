@@ -612,7 +612,7 @@ def compute_yoy(df_div):
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("##Energy Audit")
+    st.markdown("## Energy Audit")
     st.markdown("---")
     page = st.radio("Navigation", [
         "📊  Single File Analysis",
