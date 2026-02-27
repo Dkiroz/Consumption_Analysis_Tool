@@ -172,7 +172,7 @@ def render_customer_card(info):
             <div><div class="info-label">City</div><div class="info-value">{city}</div></div>
             <div><div class="info-label">Own / Rent</div><div class="info-value">{own_rent}</div></div>
             <div><div class="info-label">Community</div><div class="info-value">{community}</div></div>
-            <div><div class="info-label">GRU Rep</div><div class="info-value">{rep}</div></div>
+            <div><div class="info-label"> Rep</div><div class="info-value">{rep}</div></div>
             <div><div class="info-label">Survey Date</div><div class="info-value">{date} {time_}</div></div>
             <div><div class="info-label">Results Sent To</div><div class="info-value">{email}</div></div>
         </div>
@@ -612,7 +612,7 @@ def compute_yoy(df_div):
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ⚡ GRU Energy Audit")
+    st.markdown("##Energy Audit")
     st.markdown("---")
     page = st.radio("Navigation", [
         "📊  Single File Analysis",
