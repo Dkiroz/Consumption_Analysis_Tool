@@ -22,7 +22,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="GRU Energy Audit Analyzer",
+    page_title="Energy Audit Analyzer",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
