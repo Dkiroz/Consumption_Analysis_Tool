@@ -616,7 +616,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio("Navigation", [
         "📊  Single File Analysis",
-        "📈  Year-over-Year",
+        ##"📈  Year-over-Year",
         "⚡  AMI Analysis",
     ], label_visibility="collapsed")
     st.markdown("---")
