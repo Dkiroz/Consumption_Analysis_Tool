@@ -172,7 +172,7 @@ def render_customer_card(info):
             <div><div class="info-label">City</div><div class="info-value">{city}</div></div>
             <div><div class="info-label">Own / Rent</div><div class="info-value">{own_rent}</div></div>
             <div><div class="info-label">Community</div><div class="info-value">{community}</div></div>
-            <div><div class="info-label"> Rep</div><div class="info-value">{rep}</div></div>
+            <div><div class="info-label">GRU Rep</div><div class="info-value">{rep}</div></div>
             <div><div class="info-label">Survey Date</div><div class="info-value">{date} {time_}</div></div>
             <div><div class="info-label">Results Sent To</div><div class="info-value">{email}</div></div>
         </div>
@@ -336,7 +336,7 @@ class MeterLoader:
     COLUMN_MAP = {
         "Division"   : "division",
         "Device"     : "device",
-        "MR Reason"  : "mr_reason",   # present in some files
+        "MR Reason"  : "mr_reason",
         "MR Type"    : "mr_type",
         "MR Date"    : "mr_date",
         "Days"       : "days",
@@ -346,17 +346,12 @@ class MeterLoader:
         "Avg."       : "avg_daily",
         "Avg"        : "avg_daily",
     }
-
     NON_READ_REASONS = {3}
     VLINE_REASONS    = {6, 21, 22}
 
-    # MR Type strings to exclude entirely (equivalent to NON_READ_REASONS)
-    NON_READ_TYPES = {"automatic estimation"}
-
     def __init__(self, fileobj):
-        self.fileobj      = fileobj
-        self.df           = None
-        self.has_mr_reason = False   # ← track whether markers are possible
+        self.fileobj = fileobj
+        self.df      = None
 
     def _find_sheet(self, xl):
         for name in xl.sheet_names:
@@ -371,9 +366,6 @@ class MeterLoader:
         df.columns = df.columns.str.strip()
         df = df.rename(columns=self.COLUMN_MAP)
 
-        # Track whether numeric MR Reason column exists
-        self.has_mr_reason = "mr_reason" in df.columns
-
         df["mr_date"] = pd.to_datetime(df["mr_date"], errors="coerce")
 
         if df["consumption"].dtype == object:
@@ -385,19 +377,9 @@ class MeterLoader:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
         df = df.dropna(subset=["mr_date"])
-
-        if self.has_mr_reason:
-            # Numeric MR Reason file — filter by reason codes
-            df["mr_reason"] = pd.to_numeric(df["mr_reason"], errors="coerce")
-            df = df[~df["mr_reason"].isin(self.NON_READ_REASONS)]
-            df = df[(df["consumption"] > 0) | (df["mr_reason"].isin(self.VLINE_REASONS))]
-        else:
-            # String MR Type only — exclude junk types and zero rows
-            if "mr_type" in df.columns:
-                df = df[~df["mr_type"].str.strip().str.lower().isin(self.NON_READ_TYPES)]
-            df = df[df["consumption"] > 0]
-
+        df = df[~df["mr_reason"].isin(self.NON_READ_REASONS)]
         df = df[df["days"] > 0]
+        df = df[(df["consumption"] > 0) | (df["mr_reason"].isin(self.VLINE_REASONS))]
         df = df.sort_values(["division", "device", "mr_date"]).reset_index(drop=True)
         self.df = df
         return df
@@ -513,17 +495,30 @@ def add_markers(ax, df):
                 bbox=dict(boxstyle="round,pad=0.1", fc=BG_CARD, ec="#00cfff", alpha=0.8))
         first_label = False
 
+    # Meter Change (reasons 21+22) — orange band + label
     changes     = get_meter_changes(df)
     first_label = True
     for date_start, date_end in changes:
         lbl = "Meter Change" if first_label else "_nolegend_"
+        # Add 15-day padding so band is visible even on long date ranges
+        pad = pd.Timedelta(days=15)
         if date_start == date_end:
-            ax.axvline(x=date_start, color="darkorange",
-                       linewidth=1.8, linestyle="--", alpha=0.9, label=lbl)
+            ax.axvline(x=date_start, color="#ff8c00",
+                       linewidth=2.5, linestyle="-", alpha=1.0, label=lbl, zorder=5)
+            ymin, ymax = ax.get_ylim()
+            ax.text(date_start, ymax * 0.95, "Meter\nChange",
+                    color="#ff8c00", fontsize=7, ha="center", va="top", zorder=6,
+                    bbox=dict(boxstyle="round,pad=0.1", fc=BG_CARD, ec="#ff8c00", alpha=0.8))
         else:
-            ax.axvspan(date_start, date_end, color="darkorange", alpha=0.18, label=lbl)
-            ax.axvline(x=date_start, color="darkorange", linewidth=1.2, linestyle="--", alpha=0.6)
-            ax.axvline(x=date_end,   color="darkorange", linewidth=1.2, linestyle="--", alpha=0.6)
+            ax.axvspan(date_start - pad, date_end + pad,
+                       color="#ff8c00", alpha=0.25, label=lbl, zorder=3)
+            ax.axvline(x=date_start, color="#ff8c00", linewidth=2.5, linestyle="-", alpha=1.0, zorder=5)
+            ax.axvline(x=date_end,   color="#ff8c00", linewidth=2.5, linestyle="-", alpha=1.0, zorder=5)
+            ymin, ymax = ax.get_ylim()
+            mid = date_start + (date_end - date_start) / 2
+            ax.text(mid, ymax * 0.95, "Meter\nChange",
+                    color="#ff8c00", fontsize=7, ha="center", va="top", zorder=6,
+                    bbox=dict(boxstyle="round,pad=0.1", fc=BG_CARD, ec="#ff8c00", alpha=0.8))
         first_label = False
 
 
@@ -639,7 +634,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio("Navigation", [
         "📊  Single File Analysis",
-        ##"📈  Year-over-Year",
+        "📈  Year-over-Year",
         "⚡  AMI Analysis",
     ], label_visibility="collapsed")
     st.markdown("---")
@@ -664,18 +659,19 @@ if page == "📊  Single File Analysis":
 
             loader = MeterLoader(io.BytesIO(file_bytes))
             loader.load_and_clean()
-            
+
             division = st.radio("Division", ["Electricity", "Water"], horizontal=True)
             df_div   = loader.get_division(division)
-            
+
             if df_div.empty:
                 st.warning(f"No {division} data found in this file.")
             else:
-                feats      = MeterFeatures(df_div).compute_features()
-                unit       = feats["unit"]
-                df_full    = feats["df_with_anomalies"]
+                feats   = MeterFeatures(df_div).compute_features()
+                unit    = feats["unit"]
+                df_full = feats["df_with_anomalies"]
+                # df_div is used for markers — it contains ALL rows including vline reasons
+                # df_full only reliably contains consumption > 0 rows after anomaly detection
                 df_markers = df_div
-                has_markers = loader.has_mr_reason   # ← only True when numeric MR Reason exists
 
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.metric("Total Consumption", f"{feats['total_consumption']:,.1f} {unit}")
@@ -698,8 +694,7 @@ if page == "📊  Single File Analysis":
                     fig, ax = dark_fig()
                     s = feats["period_series"]
                     ax.bar(s.index, s.values, width=20, color="#4f8ef7", alpha=0.85, label="Consumption")
-                    if has_markers:     
-                      add_markers(ax, df_full)
+                    add_markers(ax, df_markers)
                     ax.set_title(f"{division} — Consumption per Read Period")
                     ax.set_ylabel(unit)
                     ax.legend(facecolor=BG_CARD, edgecolor=BORDER, labelcolor=TXT_MAIN, fontsize=8)
@@ -712,8 +707,7 @@ if page == "📊  Single File Analysis":
                     if s is not None and not s.empty:
                         ax.plot(s.index, s.values, color="#f7c94f",
                                 linewidth=2, marker="o", markersize=4, label="Daily Avg")
-                        if has_markers:     
-                          add_markers(ax, df_full)
+                        add_markers(ax, df_markers)
                         ax.set_title(f"{division} — Average Daily Usage per Period")
                         ax.set_ylabel(f"{unit}/day")
                         ax.legend(facecolor=BG_CARD, edgecolor=BORDER, labelcolor=TXT_MAIN, fontsize=8)
@@ -731,8 +725,7 @@ if page == "📊  Single File Analysis":
                             linewidth=1.5, label="Consumption")
                     ax.plot(r.index, r.values, color="#f76f6f",
                             linewidth=2.5, label="3-Read Rolling Avg")
-                    if has_markers:     
-                      add_markers(ax, df_full)
+                    add_markers(ax, df_markers)
                     ax.set_title(f"{division} — Consumption Trend")
                     ax.set_ylabel(unit)
                     ax.legend(facecolor=BG_CARD, edgecolor=BORDER, labelcolor=TXT_MAIN, fontsize=8)
@@ -748,8 +741,7 @@ if page == "📊  Single File Analysis":
                            width=20, color="#4f8ef7", alpha=0.85, label="Normal")
                     ax.bar(anomaly["mr_date"], anomaly["consumption"],
                            width=20, color="#f76f6f", alpha=0.9,  label="Anomaly")
-                    if has_markers:     
-                      add_markers(ax, df_full)
+                    add_markers(ax, df_markers)
                     ax.set_title(f"{division} — Anomaly Detection")
                     ax.set_ylabel(unit)
                     ax.legend(facecolor=BG_CARD, edgecolor=BORDER, labelcolor=TXT_MAIN, fontsize=8)
