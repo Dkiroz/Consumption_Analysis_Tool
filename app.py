@@ -1,6 +1,3 @@
-
-Copy
-
 """
 GRU Energy Audit Analyzer
 =========================
@@ -45,7 +42,7 @@ st.set_page_config(
 # STYLING
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown("""
+st.markdown(
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
@@ -256,7 +253,7 @@ st.markdown("""
     /* Matplotlib figures */
     .stImage > img { border-radius: 6px; }
 </style>
-""", unsafe_allow_html=True)
+, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -726,7 +723,7 @@ def stat_card(label, value, unit="", warning=False, ok=False):
         <div class="stat-value">{value}</div>
         <div class="stat-unit">{unit}</div>
     </div>
-    """, unsafe_allow_html=True)
+    , unsafe_allow_html=True)
 
 
 def section_header(text):
@@ -741,7 +738,7 @@ def checklist_item(text, priority=False):
         <span class="checklist-icon">{icon}</span>
         <span>{text}</span>
     </div>
-    """, unsafe_allow_html=True)
+    , unsafe_allow_html=True)
 
 
 def corr_label(r, division):
@@ -761,7 +758,7 @@ def corr_label(r, division):
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("""
+    st.markdown(
     <div style="padding: 0.5rem 0 1.5rem 0;">
         <div style="font-family:'IBM Plex Mono',monospace; font-size:0.65rem;
                     letter-spacing:0.15em; text-transform:uppercase; color:#636366;
@@ -787,22 +784,22 @@ with st.sidebar:
         3. Review analysis tabs<br>
         4. Print checklist before survey
     </div>
-    """, unsafe_allow_html=True)
+    , unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN CONTENT
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown("""
+st.markdown(
 <div class="audit-header">
     <h1>⚡ GRU Energy Audit</h1>
     <span class="subtitle">Pre-Survey Analysis Tool</span>
 </div>
-""", unsafe_allow_html=True)
+, unsafe_allow_html=True)
 
 if meter_file is None:
-    st.markdown("""
+    st.markdown(
     <div style="text-align:center; padding: 4rem 2rem; color:#98989D;">
         <div style="font-size:2.5rem; margin-bottom:1rem;">📂</div>
         <div style="font-size:1rem; font-weight:500; color:#6E6E73; margin-bottom:0.5rem;">
@@ -812,7 +809,7 @@ if meter_file is None:
             Use the sidebar to upload a meter reading Excel file
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    , unsafe_allow_html=True)
     st.stop()
 
 # ── Load data ────────────────────────────────────────────────────────────────
@@ -1161,7 +1158,7 @@ with tabs[-1]:
         if not df_d.empty:
             f    = MeterFeatures(df_d).compute()
             with col:
-                st.markdown(f"""
+                st.markdown(f
                 <div class="stat-card">
                     <div class="stat-label">{div_name}</div>
                     <div style="font-size:0.82rem; color:#1C1C1E; line-height:2; margin-top:0.25rem;">
@@ -1175,10 +1172,10 @@ with tabs[-1]:
                         <b style="color:{'#FF3B30' if f['n_anomalies'] > 0 else '#34C759'}">{f['n_anomalies']}</b>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                , unsafe_allow_html=True)
 
-    st.markdown("""
+    st.markdown(
     <div style="margin-top:1.5rem; font-size:0.72rem; color:#C7C7CC; text-align:center;">
         GRU Energy Audit Analyzer &nbsp;·&nbsp; Internal use only
     </div>
-    """, unsafe_allow_html=True
+    , unsafe_allow_html=True
