@@ -1,6 +1,3 @@
-App · PY
-Copy
-
 # ═══════════════════════════════════════════════════════════════════
 # GRU Energy Audit Analyzer — Streamlit App
 # Converted from Consumption_Project_V1.ipynb
