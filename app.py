@@ -1280,9 +1280,9 @@ with tab_meter:
                 # ── Auditor Action List ───────────────────────────
                 st.subheader("📋 Auditor Action List")
                 st.caption(
-                    "**🔴 HIGH** = Persistent extreme anomaly — immediate site visit recommended  |  "
-                    "**🟠 MEDIUM** = Persistent elevated or recurring pattern — schedule follow-up  |  "
-                    "**🟡 REVIEW** = Single-period spike — monitor next billing period  |  "
+                    "**🔴 HIGH** = Persistent extreme anomaly|  "
+                    "**🟠 MEDIUM** = Persistent elevated or recurring pattern |  "
+                    "**🟡 REVIEW** = Single-period spike |  "
                     "**✅ NORMAL** = Usage consistent with weather patterns"
                 )
 
