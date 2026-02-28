@@ -1066,7 +1066,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
 # ═══════════════════════════════════════════════════════════════════
 
 st.title("Energy Audit Analyzer")
-st.caption("Energy & Water Savings Plan  |  Internal Analysis Tool  |  2026")
+st.caption("Energy & Business Services | Daniel Quiroz")
 
 tab_meter, tab_ami = st.tabs(["📊 Meter Reading Analysis", "🔬 AMI Interval Analysis"])
 
