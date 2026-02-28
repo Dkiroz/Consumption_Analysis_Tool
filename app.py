@@ -24,8 +24,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="GRU Energy Audit Analyzer",
-    page_icon="⚡",
+    page_title="Energy Audit Analyzer",
     layout="wide",
 )
 
@@ -1230,7 +1229,7 @@ with tab_meter:
         st.divider()
 
         # ── Section 7: Weather-Normalized Anomaly Framework ──────
-        st.subheader("Usage vs. Weather Expectations)")
+        st.subheader("Usage vs. Weather Expectations")
         st.caption(
             "The dashed line represents the model's predicted daily usage for each billing period, calculated from historical patterns adjusted for Gainesville heating and cooling degree days."
             "The shaded band is the expected normal range — periods where usage falls within this band are consistent with weather-driven behavior. A red triangle above the band indicates the customer used significantly more energy than the weather conditions."
