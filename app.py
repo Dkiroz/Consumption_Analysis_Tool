@@ -1159,6 +1159,7 @@ with tab_meter:
         st.image(graphs.plot_rolling_average(), use_container_width=True)
         st.divider()
 
+        '''
         # ── Isolation Forest Anomaly Detection ───────────────────
         st.subheader("🚨 Anomaly Detection — Isolation Forest")
         st.caption(
@@ -1175,7 +1176,7 @@ with tab_meter:
         else:
             st.success("✅ No anomalous periods flagged by Isolation Forest.")
         st.divider()
-
+        '''
         # ── Year-over-Year ────────────────────────────────────────
         st.subheader("📅 Year-over-Year Comparison")
         yoy = compute_year_over_year(df_div)
