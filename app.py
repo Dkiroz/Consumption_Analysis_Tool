@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 GRU Energy Audit Analyzer — Pre-Survey Report Tool
 ===================================================
