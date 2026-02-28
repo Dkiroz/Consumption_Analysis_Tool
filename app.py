@@ -1068,7 +1068,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
 st.title("Energy Audit Analyzer")
 st.caption("Energy & Business Services | Daniel Quiroz")
 
-tab_meter, tab_ami = st.tabs(["📊 Meter Reading Analysis", "🔬 AMI Interval Analysis"])
+tab_meter, tab_ami = st.tabs([" Meter Reading Analysis", "AMI Interval Analysis"])
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1094,7 +1094,7 @@ with tab_meter:
             try:
                 loader.load_and_clean()
             except Exception as e:
-                st.error(f"❌ Could not load meter data: {e}")
+                st.error(f" Could not load meter data: {e}")
                 st.stop()
 
             df_elec  = loader.get_division("Electricity")
@@ -1172,7 +1172,7 @@ with tab_meter:
         st.divider()
 
         # ── Temperature Correlation ───────────────────────────────
-        st.subheader("🌡️ Temperature Correlation — Gainesville FL")
+        st.subheader("Temperature Correlation — Gainesville FL")
         st.caption(
             "**Electricity & Water** use a V-shape model: usage is correlated against "
             "|temp − 65°F| (distance from comfort baseline), which captures both "
@@ -1273,16 +1273,16 @@ with tab_meter:
                         use_container_width=True,
                     )
                 else:
-                    st.success("✅ No weather-normalized anomalies detected.")
+                    st.success(" No weather-normalized anomalies detected.")
 
                 st.divider()
 
                 # ── Auditor Action List ───────────────────────────
-                st.subheader("📋 Auditor Action List")
+                st.subheader("Auditor Action List")
                 st.caption(
-                    "**🔴 HIGH** = Persistent extreme anomaly|  "
-                    "**🟠 MEDIUM** = Persistent elevated or recurring pattern |  "
-                    "**🟡 REVIEW** = Single-period spike |  "
+                    "**🔴 HIGH** = Persistent extreme anomaly "
+                    "**🟠 MEDIUM** = Persistent elevated or recurring pattern  "
+                    "**🟡 REVIEW** = Single-period spike "
                     "**✅ NORMAL** = Usage consistent with weather patterns"
                 )
 
@@ -1317,7 +1317,7 @@ with tab_meter:
 
         # ── Raw Data Viewer ───────────────────────────────────────
         st.divider()
-        with st.expander("🗂️ View Raw Meter Data"):
+        with st.expander("View Raw Meter Data"):
             st.dataframe(df_div, use_container_width=True)
 
 
@@ -1344,7 +1344,7 @@ with tab_ami:
             try:
                 df_ami = ami_loader.load_and_clean()
             except Exception as e:
-                st.error(f"❌ Could not load AMI data: {e}")
+                st.error(f"Could not load AMI data: {e}")
                 st.stop()
 
             unit       = ami_loader.unit
@@ -1353,7 +1353,7 @@ with tab_ami:
             ami_graphs = AMIGraphs(ami_feats, title_prefix=util_type, unit=unit)
 
         # ── AMI Summary ───────────────────────────────────────────
-        st.subheader(f"⚡ AMI Summary — {util_type}")
+        st.subheader(f" AMI Summary — {util_type}")
         a1, a2, a3, a4, a5 = st.columns(5)
         a1.metric("Interval",    f"{ami_feats['interval_minutes']} min")
         a2.metric("Base Load",   f"{ami_feats['base_load_kw']:.3f} kW")
@@ -1366,18 +1366,18 @@ with tab_ami:
         st.divider()
 
         # ── AMI Charts ────────────────────────────────────────────
-        st.subheader("📊 Load Shape (Full Timeline)")
+        st.subheader("Load Shape (Full Timeline)")
         st.image(ami_graphs.plot_load_shape(), use_container_width=True)
 
-        st.subheader("📊 Daily Totals")
+        st.subheader("Daily Totals")
         st.image(ami_graphs.plot_daily_totals(), use_container_width=True)
 
-        st.subheader("📊 Hourly Load Profile")
+        st.subheader("Hourly Load Profile")
         st.image(ami_graphs.plot_hourly_profile(), use_container_width=True)
         st.divider()
 
         # ── AMI Temperature Correlation ───────────────────────────
-        st.subheader("🌡️ AMI Temperature Correlation — Gainesville FL")
+        st.subheader("AMI Temperature Correlation — Gainesville FL")
         st.caption(
             "V-shape model (|temp − 65°F|) for Electricity/Water. "
             "Linear model for Gas. Same methodology as meter reading analysis."
@@ -1455,5 +1455,5 @@ with tab_ami:
 
         # ── Raw AMI Data ──────────────────────────────────────────
         st.divider()
-        with st.expander("🗂️ View Raw AMI Data (first 500 rows)"):
+        with st.expander("View Raw AMI Data (first 500 rows)"):
             st.dataframe(df_ami.head(500), use_container_width=True)
