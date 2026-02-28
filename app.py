@@ -1159,24 +1159,6 @@ with tab_meter:
         st.image(graphs.plot_rolling_average(), use_container_width=True)
         st.divider()
 
-        '''
-        # ── Isolation Forest Anomaly Detection ───────────────────
-        st.subheader("🚨 Anomaly Detection — Isolation Forest")
-        st.caption(
-            "Isolation Forest flags periods that are statistically unusual based on "
-            "consumption, days, and daily average — without accounting for weather. "
-            "The weather-normalized model in Section 7 (below) is more precise."
-        )
-        anomaly_img, anomaly_df = graphs.plot_anomalies()
-        st.image(anomaly_img, use_container_width=True)
-        if not anomaly_df.empty:
-            cols = [c for c in ["mr_date", "mr_reason", "mr_type", "days",
-                                "consumption", "avg_daily"] if c in anomaly_df.columns]
-            st.dataframe(anomaly_df[cols].reset_index(drop=True), use_container_width=True)
-        else:
-            st.success("✅ No anomalous periods flagged by Isolation Forest.")
-        st.divider()
-        '''
         # ── Year-over-Year ────────────────────────────────────────
         st.subheader("📅 Year-over-Year Comparison")
         yoy = compute_year_over_year(df_div)
