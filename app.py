@@ -984,7 +984,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
             "detail"           : f"Using {actual:.1f} {unit}/day vs {predicted:.1f} predicted",
             "z_score"          : round(z, 2),
             "last_read"        : last_read,
-            "action"           : "Schedule site visit — check HVAC, water heater, insulation",
+            "action"           : "check HVAC, water heater, insulation",
             "potential_savings": f"{(actual - predicted) * 30:.0f} {unit}/month",
         })
     elif latest["persistent_low"] and z < -4:
@@ -1006,7 +1006,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
             "detail"           : f"Using {actual:.1f} {unit}/day vs {predicted:.1f} predicted",
             "z_score"          : round(z, 2),
             "last_read"        : last_read,
-            "action"           : "Phone consultation — discuss usage patterns, HVAC maintenance",
+            "action"           : "discuss usage patterns, HVAC maintenance",
             "potential_savings": f"{(actual - predicted) * 30:.0f} {unit}/month",
         })
     elif latest["persistent_low"] and -4 <= z < -2.5:
@@ -1040,7 +1040,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
             "detail"           : f"Spike: {actual:.1f} {unit}/day  (z = {z:.2f})",
             "z_score"          : round(z, 2),
             "last_read"        : last_read,
-            "action"           : "Monitor next billing period — may self-resolve",
+            "action"           : "may self-resolve",
             "potential_savings": "TBD",
         })
 
@@ -1055,7 +1055,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
             ),
             "z_score"          : round(z, 2),
             "last_read"        : last_read,
-            "action"           : "No action required — usage consistent with weather patterns",
+            "action"           : "usage consistent with weather patterns",
             "potential_savings": "—",
         })
 
@@ -1066,7 +1066,7 @@ def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit=
 # STREAMLIT UI
 # ═══════════════════════════════════════════════════════════════════
 
-st.title("⚡ GRU Energy Audit Analyzer")
+st.title("Energy Audit Analyzer")
 st.caption("Energy & Water Savings Plan  |  Internal Analysis Tool  |  2026")
 
 tab_meter, tab_ami = st.tabs(["📊 Meter Reading Analysis", "🔬 AMI Interval Analysis"])
