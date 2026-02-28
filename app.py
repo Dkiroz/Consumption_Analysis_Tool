@@ -1230,10 +1230,11 @@ with tab_meter:
         st.divider()
 
         # ── Section 7: Weather-Normalized Anomaly Framework ──────
-        st.subheader("🧠 Weather-Normalized Anomaly Detection (Section 7)")
+        st.subheader("Usage vs. Weather Expectations)")
         st.caption(
-            "Trains a rolling **HuberRegressor** (robust to outliers) on Heating Degree Days "
-            "and Cooling Degree Days to predict expected usage for each billing period. "
+            "The dashed line represents the model's predicted daily usage for each billing period, calculated from historical patterns adjusted for Gainesville heating and cooling degree days."
+            "The shaded band is the expected normal range — periods where usage falls within this band are consistent with weather-driven behavior. A red triangle above the band indicates the customer used significantly more energy than the weather conditions."
+            " A blue triangle below the band indicates unexpectedly low usage. The z-score bars at the bottom quantify the deviation in standard deviations from predicted."
             f"Periods where actual usage deviates more than **±{RESIDUAL_Z_THRESHOLD}σ** "
             "from the weather-adjusted prediction are flagged. "
             f"**Persistent anomalies** ({PERSISTENCE_PERIODS}+ consecutive flagged periods) "
