@@ -1,7 +1,11 @@
+App · PY
+Copy
+
 # ═══════════════════════════════════════════════════════════════════
 # GRU Energy Audit Analyzer — Streamlit App
 # Converted from Consumption_Project_V1.ipynb
-# Sections 1–7 included. Section 8 (Customer Mapping) excluded.
+# Includes: Sections 1–7, Auditor Action List, Cross-Utility Correlation
+# Excludes: Section 6 (Batch), Section 8 (Customer Mapping)
 # ═══════════════════════════════════════════════════════════════════
 
 import io
@@ -15,6 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import streamlit as st
 from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import HuberRegressor
 
 warnings.filterwarnings("ignore")
 
@@ -22,7 +27,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Energy Audit Analyzer",
+    page_title="GRU Energy Audit Analyzer",
     page_icon="⚡",
     layout="wide",
 )
@@ -30,8 +35,24 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────
-GAINESVILLE_LAT = 29.6516
-GAINESVILLE_LON = -82.3248
+GAINESVILLE_LAT      = 29.6516
+GAINESVILLE_LON      = -82.3248
+COMFORT_BASE         = 65
+MIN_HISTORY_PERIODS  = 8
+RESIDUAL_Z_THRESHOLD = 2.5
+PERSISTENCE_PERIODS  = 2
+
+
+# ═══════════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════════
+
+def _fig_to_img(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -52,7 +73,6 @@ class MeterLoader:
         "Avg."       : "avg_daily",
         "Avg"        : "avg_daily",
     }
-
     NON_READ_REASONS = {3}
     VLINE_REASONS    = {6, 21, 22}
     NON_READ_TYPES   = {"automatic estimation"}
@@ -80,13 +100,11 @@ class MeterLoader:
         xl         = pd.ExcelFile(self.fileobj)
         sheet      = self._find_sheet(xl)
         header_row = self._find_header_row(xl, sheet)
-
-        df = pd.read_excel(xl, sheet_name=sheet, header=header_row)
+        df         = pd.read_excel(xl, sheet_name=sheet, header=header_row)
         df.columns = df.columns.str.strip()
-        df = df.rename(columns=self.COLUMN_MAP)
+        df         = df.rename(columns=self.COLUMN_MAP)
 
         self.has_mr_reason = "mr_reason" in df.columns
-
         df["mr_date"] = pd.to_datetime(df["mr_date"], errors="coerce")
 
         if df["consumption"].dtype == object:
@@ -167,13 +185,13 @@ class MeterFeatures:
 
     def _compute_quality_score(self, df):
         score = 100
-        if df["consumption"].isna().any():          score -= 10
-        if df["days"].std() > 10:                   score -= 5
-        if len(df) < 12:                            score -= 15
-        if (df["consumption"] == 0).sum() > 2:      score -= 10
+        if df["consumption"].isna().any():     score -= 10
+        if df["days"].std() > 10:              score -= 5
+        if len(df) < 12:                       score -= 15
+        if (df["consumption"] == 0).sum() > 2: score -= 10
         if len(df) > 1:
             gaps = df["mr_date"].diff().dt.days
-            if gaps.max() > 60:                     score -= 20
+            if gaps.max() > 60:                score -= 20
         return max(0, score)
 
 
@@ -218,7 +236,7 @@ class MeterGraphs:
         df = self.df
         if "mr_reason" not in df.columns:
             return
-        move_ins    = df[df["mr_reason"] == 6]
+        move_ins     = df[df["mr_reason"] == 6]
         first_movein = True
         for _, row in move_ins.iterrows():
             lbl = "Move-In" if first_movein else "_nolegend_"
@@ -239,13 +257,6 @@ class MeterGraphs:
                 ax.axvline(x=date_end,   color="darkorange", linewidth=1.2, linestyle="--", alpha=0.6)
             first_change = False
 
-    def _fig_to_img(self, fig):
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
-
     def plot_consumption(self):
         df_plot = self.df[self.df["consumption"] > 0]
         s = df_plot.set_index("mr_date")["consumption"]
@@ -257,7 +268,7 @@ class MeterGraphs:
         ax.legend()
         fig.autofmt_xdate()
         plt.tight_layout()
-        return self._fig_to_img(fig)
+        return _fig_to_img(fig)
 
     def plot_daily_average(self):
         s = self.feats["daily_avg_series"]
@@ -273,7 +284,7 @@ class MeterGraphs:
         ax.legend()
         fig.autofmt_xdate()
         plt.tight_layout()
-        return self._fig_to_img(fig)
+        return _fig_to_img(fig)
 
     def plot_rolling_average(self):
         df_plot = self.df[self.df["consumption"] > 0]
@@ -288,7 +299,7 @@ class MeterGraphs:
         ax.legend()
         fig.autofmt_xdate()
         plt.tight_layout()
-        return self._fig_to_img(fig)
+        return _fig_to_img(fig)
 
     def plot_anomalies(self):
         df      = self.df[self.df["consumption"] > 0]
@@ -298,15 +309,14 @@ class MeterGraphs:
         ax.bar(normal["mr_date"],  normal["consumption"],
                width=20, color="steelblue", alpha=0.85, label="Normal")
         ax.bar(anomaly["mr_date"], anomaly["consumption"],
-               width=20, color="crimson",   alpha=0.9,  label="Anomaly")
+               width=20, color="crimson",   alpha=0.9,  label="Anomaly (Isolation Forest)")
         self._add_markers(ax)
-        ax.set_title(f"{self.prefix} — Anomaly Detection")
+        ax.set_title(f"{self.prefix} — Anomaly Detection (Isolation Forest)")
         ax.set_ylabel(self.feats["unit"])
         ax.legend()
         fig.autofmt_xdate()
         plt.tight_layout()
-        img = self._fig_to_img(fig)
-        return img, anomaly
+        return _fig_to_img(fig), anomaly
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -315,14 +325,10 @@ class MeterGraphs:
 
 class AMILoader:
     SHEET_TYPE_MAP = {
-        "ELECTRIC": "Electric",
-        "Electric": "Electric",
-        "Sheet1"  : "Electric",
-        "SHEET1"  : "Electric",
-        "WATER"   : "Water",
-        "Water"   : "Water",
-        "GAS"     : "Gas",
-        "Gas"     : "Gas",
+        "ELECTRIC": "Electric", "Electric": "Electric",
+        "Sheet1"  : "Electric", "SHEET1"  : "Electric",
+        "WATER"   : "Water",    "Water"   : "Water",
+        "GAS"     : "Gas",      "Gas"     : "Gas",
     }
     UNIT_MAP = {"Electric": "kWh", "Water": "Gal", "Gas": "CCF"}
 
@@ -341,7 +347,6 @@ class AMILoader:
     def load_and_clean(self):
         xl    = pd.ExcelFile(self.fileobj)
         sheet = self._find_sheet(xl)
-
         self.util_type = self.SHEET_TYPE_MAP.get(sheet, "Electric")
         self.unit      = self.UNIT_MAP[self.util_type]
 
@@ -356,19 +361,16 @@ class AMILoader:
         df["timestamp"] = pd.to_datetime(df["timestamp"],
                                          format="%b %d, %Y - %I:%M %p",
                                          errors="coerce")
-
         df["value_raw"] = (df["raw_value"].astype(str)
                            .str.replace(",", "", regex=False)
                            .str.extract(r"([\d.]+)")[0])
         df["value_raw"] = pd.to_numeric(df["value_raw"], errors="coerce")
-
-        df["value"] = df["value_raw"] / 1000 if self.util_type == "Electric" else df["value_raw"]
-        df["kwh"]   = df["value"]
+        df["value"]     = df["value_raw"] / 1000 if self.util_type == "Electric" else df["value_raw"]
+        df["kwh"]       = df["value"]
 
         df = df.dropna(subset=["timestamp", "kwh"])
         df = df[df["kwh"] > 0]
         df = df.sort_values("timestamp").reset_index(drop=True)
-
         self.df = df
         return df
 
@@ -378,24 +380,20 @@ class AMIFeatures:
         self.df = df.copy()
 
     def compute(self):
-        df = self.df.sort_values("timestamp")
-
+        df               = self.df.sort_values("timestamp")
         deltas           = df["timestamp"].diff().dropna()
         interval         = deltas.mode()[0]
         interval_minutes = int(interval.total_seconds() / 60)
-
-        base_load    = df["kwh"].quantile(0.05)
-        base_load_kw = base_load / (interval_minutes / 60)
-        peak_kwh     = df["kwh"].max()
-        peak_kw      = peak_kwh / (interval_minutes / 60)
-
-        df["date"]    = df["timestamp"].dt.date
-        daily_series  = df.groupby("date")["kwh"].sum()
-        daily_avg_kwh = daily_series.mean()
-        peak_day      = pd.Timestamp(daily_series.idxmax())
-
-        df["hour"]  = df["timestamp"].dt.hour
-        avg_by_hour = df.groupby("hour")["kwh"].mean()
+        base_load        = df["kwh"].quantile(0.05)
+        base_load_kw     = base_load / (interval_minutes / 60)
+        peak_kwh         = df["kwh"].max()
+        peak_kw          = peak_kwh / (interval_minutes / 60)
+        df["date"]       = df["timestamp"].dt.date
+        daily_series     = df.groupby("date")["kwh"].sum()
+        daily_avg_kwh    = daily_series.mean()
+        peak_day         = pd.Timestamp(daily_series.idxmax())
+        df["hour"]       = df["timestamp"].dt.hour
+        avg_by_hour      = df.groupby("hour")["kwh"].mean()
 
         return {
             "interval_minutes": interval_minutes,
@@ -417,13 +415,6 @@ class AMIGraphs:
         self.prefix = title_prefix
         self.unit   = unit
 
-    def _fig_to_img(self, fig):
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
-
     def plot_load_shape(self):
         df       = self.feats["df"]
         base_kwh = self.feats["base_load"]
@@ -441,7 +432,7 @@ class AMIGraphs:
         ax.legend(fontsize=8)
         fig.autofmt_xdate()
         plt.tight_layout()
-        return self._fig_to_img(fig)
+        return _fig_to_img(fig)
 
     def plot_daily_totals(self):
         ds       = self.feats["daily_series"]
@@ -457,7 +448,7 @@ class AMIGraphs:
         ax.legend(fontsize=8)
         fig.autofmt_xdate()
         plt.tight_layout()
-        return self._fig_to_img(fig)
+        return _fig_to_img(fig)
 
     def plot_hourly_profile(self):
         ah      = self.feats["avg_by_hour"]
@@ -472,7 +463,7 @@ class AMIGraphs:
         ax.set_xticks(range(0, 24))
         ax.legend(fontsize=8)
         plt.tight_layout()
-        return self._fig_to_img(fig)
+        return _fig_to_img(fig)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -524,9 +515,9 @@ def get_master_sheet_info(fileobj):
 
 @st.cache_data(show_spinner="Fetching Gainesville temperature data…")
 def get_gainesville_temps(start_date, end_date):
-    start = pd.to_datetime(start_date).strftime("%Y-%m-%d")
-    end   = pd.to_datetime(end_date).strftime("%Y-%m-%d")
-    url   = "https://archive-api.open-meteo.com/v1/archive"
+    start  = pd.to_datetime(start_date).strftime("%Y-%m-%d")
+    end    = pd.to_datetime(end_date).strftime("%Y-%m-%d")
+    url    = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude"        : GAINESVILLE_LAT,
         "longitude"       : GAINESVILLE_LON,
@@ -539,15 +530,14 @@ def get_gainesville_temps(start_date, end_date):
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json()["daily"]
+        data    = resp.json()["daily"]
         df_temp = pd.DataFrame({
             "date"    : pd.to_datetime(data["time"]),
             "temp_max": data["temperature_2m_max"],
             "temp_min": data["temperature_2m_min"],
         })
         df_temp["temp_avg"] = (df_temp["temp_max"] + df_temp["temp_min"]) / 2
-        df_temp = df_temp.set_index("date")
-        return df_temp
+        return df_temp.set_index("date")
     except Exception as e:
         st.warning(f"⚠️ Could not fetch temperature data: {e}")
         return None
@@ -558,8 +548,8 @@ def merge_consumption_temp(df_div, df_temp):
     df = df[df["consumption"] > 0]
     temp_avgs, temp_maxs, temp_mins = [], [], []
     for _, row in df.iterrows():
-        end_date   = row["mr_date"]
-        start_date = end_date - pd.Timedelta(days=int(row["days"]))
+        end_date     = row["mr_date"]
+        start_date   = end_date - pd.Timedelta(days=int(row["days"]))
         mask         = (df_temp.index >= start_date) & (df_temp.index <= end_date)
         period_temps = df_temp[mask]
         if not period_temps.empty:
@@ -576,15 +566,14 @@ def merge_consumption_temp(df_div, df_temp):
     return df.dropna(subset=["temp_avg"])
 
 
-def _fig_to_img(fig):
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
+# ─────────────────────────────────────────────────────────────────
+# Temperature Charts
+# V-shape model for Electricity/Water; linear for Gas
+# Side-by-side chart removed (redundant)
+# ─────────────────────────────────────────────────────────────────
 
 def plot_temp_overlay(df_merged, title_prefix=""):
+    """Consumption bars with temperature line on dual y-axis."""
     fig, ax1 = plt.subplots(figsize=(13, 4))
     ax1.bar(df_merged["mr_date"], df_merged["consumption"],
             width=20, color="steelblue", alpha=0.6, label="Consumption")
@@ -608,76 +597,71 @@ def plot_temp_overlay(df_merged, title_prefix=""):
     return _fig_to_img(fig)
 
 
-def plot_temp_side_by_side(df_merged, title_prefix=""):
-    unit = df_merged["mr_unit"].iloc[0] if "mr_unit" in df_merged.columns else "Usage"
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
-    ax1.bar(df_merged["mr_date"], df_merged["consumption"],
-            width=20, color="steelblue", alpha=0.85)
-    ax1.set_ylabel(unit)
-    ax1.set_title(f"{title_prefix} — Consumption")
-    ax2.plot(df_merged["mr_date"], df_merged["temp_avg"],
-             color="crimson", linewidth=2, marker="o", markersize=4, label="Avg Temp")
-    ax2.fill_between(df_merged["mr_date"],
-                     df_merged["temp_min"], df_merged["temp_max"],
-                     color="crimson", alpha=0.1, label="Temp Range (Min–Max)")
-    ax2.axhline(65, color="gray", linewidth=1, linestyle="--", label="65°F baseline")
-    ax2.set_ylabel("Temperature (°F)")
-    ax2.set_title("Gainesville FL — Daily Avg Temperature per Billing Period")
-    ax2.legend(fontsize=8)
-    fig.autofmt_xdate()
-    plt.tight_layout()
-    return _fig_to_img(fig)
-
-
 def plot_temp_scatter(df_merged, title_prefix="", division="Electricity"):
+    """
+    V-shape scatter for Electricity/Water: usage vs |temp - 65°F|.
+    Captures both summer cooling and winter heating demand in a single r value.
+
+    Linear scatter for Gas: usage vs raw temp (heating load goes up as temp drops).
+    The old linear Pearson r is also shown for reference but noted as misleading for HVAC.
+    """
     unit = df_merged["mr_unit"].iloc[0] if "mr_unit" in df_merged.columns else ""
-    COMFORT_BASELINE = 65
-    df_merged = df_merged.copy()
-    df_merged["temp_delta"] = (df_merged["temp_avg"] - COMFORT_BASELINE).abs()
-    if "days" in df_merged.columns:
-        df_merged["daily_cons"] = df_merged["consumption"] / df_merged["days"]
+    df   = df_merged.copy()
+    df["temp_delta"] = (df["temp_avg"] - COMFORT_BASE).abs()
+
+    if "days" in df.columns:
+        df["daily_cons"] = df["consumption"] / df["days"]
     else:
-        df_merged["daily_cons"] = df_merged["consumption"]
+        df["daily_cons"] = df["consumption"]
 
     if division == "Gas":
-        r_primary = df_merged["daily_cons"].corr(df_merged["temp_avg"])
-        r_vshaped = df_merged["daily_cons"].corr(df_merged["temp_delta"])
+        r_primary = df["daily_cons"].corr(df["temp_avg"])
+        r_vshape  = df["daily_cons"].corr(df["temp_delta"])
         x_col     = "temp_avg"
         xlabel    = "Avg Temperature (°F)  —  expect negative correlation for heating"
         title_r   = f"Linear r = {r_primary:.2f}"
-        footnote  = f"V-shape r = {r_vshaped:.2f}  (shown for reference)"
-        interp    = (
-            "Strong heating load (usage rises as temp drops)." if r_primary < -0.6
-            else "Moderate heating relationship." if r_primary < -0.3
-            else "Weak heating relationship. Gas may serve water heating or cooking too."
-        )
+        footnote  = f"V-shape r = {r_vshape:.2f}  (shown for reference)"
+        if r_primary < -0.6:
+            interp = "Strong heating load — gas usage rises significantly as temperature drops."
+        elif r_primary < -0.3:
+            interp = "Moderate heating relationship — temperature influences gas usage."
+        else:
+            interp = "Weak heating relationship — gas may serve water heating or cooking too."
     else:
-        r_primary = df_merged["daily_cons"].corr(df_merged["temp_delta"])
-        r_linear  = df_merged["daily_cons"].corr(df_merged["temp_avg"])
+        # V-shape: captures U-shaped HVAC demand (high in summer AND winter)
+        r_primary = df["daily_cons"].corr(df["temp_delta"])
+        r_linear  = df["daily_cons"].corr(df["temp_avg"])
         x_col     = "temp_delta"
-        xlabel    = "|Temperature − 65°F|  (deviation from comfort baseline)"
+        xlabel    = "|Temperature − 65°F|  (V-shape: distance from comfort baseline)"
         title_r   = f"V-shape r = {r_primary:.2f}"
-        footnote  = f"Linear Pearson r = {r_linear:.2f}  —  Low linear r is expected for HVAC-driven customers."
-        interp    = (
-            "Very strong HVAC relationship." if r_primary > 0.7
-            else "Moderate HVAC relationship." if r_primary > 0.5
-            else "Weak HVAC relationship." if r_primary > 0.3
-            else "Minimal temperature sensitivity."
+        footnote  = (
+            f"Linear Pearson r = {r_linear:.2f}  —  "
+            "Low linear r is expected and normal for HVAC customers. "
+            "Summer cooling and winter heating cancel each other out in the linear model. "
+            "The V-shape r captures both humps and is the correct metric here."
         )
+        if r_primary > 0.7:
+            interp = "Very strong HVAC relationship — usage rises clearly with both heat and cold."
+        elif r_primary > 0.5:
+            interp = "Moderate HVAC relationship — temperature clearly influences usage."
+        elif r_primary > 0.3:
+            interp = "Weak HVAC relationship — some temperature sensitivity detected."
+        else:
+            interp = "Minimal HVAC relationship — usage appears mostly independent of temperature."
 
-    def season(temp):
+    def season_color(temp):
         if temp >= 80: return "#f76f6f"
         if temp <= 55: return "#4f8ef7"
         return "#3ecf8e"
 
-    colors = [season(t) for t in df_merged["temp_avg"]]
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(df_merged[x_col], df_merged["daily_cons"],
-               c=colors, alpha=0.8, edgecolors="white", s=70, zorder=3)
-    z      = np.polyfit(df_merged[x_col], df_merged["daily_cons"], 1)
-    p      = np.poly1d(z)
-    x_line = np.linspace(df_merged[x_col].min(), df_merged[x_col].max(), 100)
-    ax.plot(x_line, p(x_line), color="darkorange", linewidth=2, linestyle="--", label="Trend")
+    colors = [season_color(t) for t in df["temp_avg"]]
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.scatter(df[x_col], df["daily_cons"],
+               c=colors, alpha=0.85, edgecolors="white", s=75, zorder=3)
+    z      = np.polyfit(df[x_col], df["daily_cons"], 1)
+    x_line = np.linspace(df[x_col].min(), df[x_col].max(), 100)
+    ax.plot(x_line, np.poly1d(z)(x_line), color="darkorange",
+            linewidth=2, linestyle="--", label="Trend")
     ax.legend(handles=[
         mpatches.Patch(color="#f76f6f", label="Hot (>80°F)"),
         mpatches.Patch(color="#4f8ef7", label="Cold (<55°F)"),
@@ -687,60 +671,398 @@ def plot_temp_scatter(df_merged, title_prefix="", division="Electricity"):
     ax.set_title(f"{title_prefix} — Usage vs Temperature  ({title_r})")
     ax.set_xlabel(xlabel)
     ax.set_ylabel(f"{unit}/day")
-    fig.text(0.5, -0.04, footnote, ha="center", fontsize=8, color="gray", style="italic")
+    fig.text(0.5, -0.05, footnote, ha="center", fontsize=7.5, color="gray", style="italic",
+             wrap=True)
     plt.tight_layout()
     return _fig_to_img(fig), r_primary, interp
 
+
+# ─────────────────────────────────────────────────────────────────
+# Cross-Utility Correlation
+# ─────────────────────────────────────────────────────────────────
+
+def plot_cross_utility_correlation(df_elec, df_water, df_gas, name=""):
+    """
+    Normalized seasonal overlay for all available divisions + pairwise Pearson r.
+    Useful for spotting whether electricity/gas move together (resistance heating)
+    or inversely (gas heating + electric cooling).
+    """
+    series     = {}
+    color_map  = {
+        "Electricity": "steelblue",
+        "Water"      : "seagreen",
+        "Gas"        : "darkorange",
+    }
+
+    def to_daily_series(df_div):
+        df = df_div[df_div["consumption"] > 0].copy().sort_values("mr_date")
+        if "avg_daily" in df.columns:
+            s = df.set_index("mr_date")["avg_daily"].dropna()
+        else:
+            s = (df["consumption"] / df["days"])
+            s.index = df["mr_date"]
+        return s
+
+    if not df_elec.empty:  series["Electricity"] = to_daily_series(df_elec)
+    if not df_water.empty: series["Water"]        = to_daily_series(df_water)
+    if not df_gas.empty:   series["Gas"]           = to_daily_series(df_gas)
+
+    if len(series) < 2:
+        return None, {}
+
+    # Normalized overlay
+    fig, ax = plt.subplots(figsize=(13, 4))
+    for div, s in series.items():
+        s_norm = (s - s.min()) / (s.max() - s.min() + 1e-9)
+        ax.plot(s.index, s_norm, color=color_map[div], linewidth=2,
+                marker="o", markersize=3, alpha=0.85, label=div)
+    ax.set_title(f"{name} — Cross-Utility Seasonal Pattern (Normalized 0–1)")
+    ax.set_ylabel("Normalized Daily Usage (0 = min, 1 = peak)")
+    ax.legend()
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    overlay_img = _fig_to_img(fig)
+
+    # Pairwise Pearson r on monthly averages
+    monthly  = {}
+    for div, s in series.items():
+        s2       = s.copy()
+        s2.index = pd.to_datetime(s2.index)
+        monthly[div] = s2.resample("MS").mean()
+
+    pairs    = {}
+    div_list = list(monthly.keys())
+    for i in range(len(div_list)):
+        for j in range(i + 1, len(div_list)):
+            a, b   = div_list[i], div_list[j]
+            merged = pd.concat([monthly[a], monthly[b]], axis=1, join="inner").dropna()
+            if len(merged) >= 4:
+                r = merged.iloc[:, 0].corr(merged.iloc[:, 1])
+                pairs[f"{a} ↔ {b}"] = round(r, 3)
+
+    return overlay_img, pairs
+
+
+# ─────────────────────────────────────────────────────────────────
+# Year-over-Year
+# ─────────────────────────────────────────────────────────────────
 
 def compute_year_over_year(df_div):
     df = df_div[df_div["consumption"] > 0].copy().sort_values("mr_date")
     if df.empty or len(df) < 2:
         return None
-    latest = df["mr_date"].max()
-    cutoff = latest - pd.DateOffset(years=1)
-    cutoff2 = cutoff - pd.DateOffset(years=1)
-
-    recent = df[df["mr_date"] > cutoff]
-    prior  = df[(df["mr_date"] > cutoff2) & (df["mr_date"] <= cutoff)]
-
+    latest  = df["mr_date"].max()
+    cutoff  = latest - pd.DateOffset(years=1)
+    cutoff2 = cutoff  - pd.DateOffset(years=1)
+    recent  = df[df["mr_date"] > cutoff]
+    prior   = df[(df["mr_date"] > cutoff2) & (df["mr_date"] <= cutoff)]
     if recent.empty or prior.empty:
         return None
 
     def daily_avg(sub):
-        total_cons = sub["consumption"].sum()
-        total_days = sub["days"].sum()
-        return total_cons / total_days if total_days > 0 else None
+        tc = sub["consumption"].sum()
+        td = sub["days"].sum()
+        return tc / td if td > 0 else None
 
     recent_avg = daily_avg(recent)
     prior_avg  = daily_avg(prior)
-
     if recent_avg is None or prior_avg is None or prior_avg == 0:
         return None
 
     pct_change = (recent_avg - prior_avg) / prior_avg * 100
     direction  = "UP ▲" if pct_change > 2 else "DOWN ▼" if pct_change < -2 else "STABLE ↔"
+    unit       = df["mr_unit"].iloc[0] if "mr_unit" in df.columns else ""
+
+    def safe_daily(sub):
+        if "avg_daily" in sub.columns:
+            return sub["avg_daily"].clip(lower=0)
+        return sub["consumption"] / sub["days"]
 
     fig, ax = plt.subplots(figsize=(13, 4))
-    ax.bar(recent["mr_date"], recent["avg_daily"] if "avg_daily" in recent.columns else recent["consumption"] / recent["days"],
+    ax.bar(recent["mr_date"], safe_daily(recent),
            width=20, color="steelblue", alpha=0.85, label="Recent 12 Months")
-    ax.bar(prior["mr_date"],  prior["avg_daily"] if "avg_daily" in prior.columns else prior["consumption"] / prior["days"],
-           width=20, color="goldenrod", alpha=0.7, label="Prior 12 Months")
-    unit = df["mr_unit"].iloc[0] if "mr_unit" in df.columns else ""
+    ax.bar(prior["mr_date"],  safe_daily(prior),
+           width=20, color="goldenrod",  alpha=0.7,  label="Prior 12 Months")
     ax.set_title("Year-over-Year Daily Average Usage")
     ax.set_ylabel(f"{unit}/day")
     ax.legend()
     fig.autofmt_xdate()
     plt.tight_layout()
-    img = _fig_to_img(fig)
 
     return {
-        "recent_avg" : recent_avg,
-        "prior_avg"  : prior_avg,
-        "pct_change" : pct_change,
-        "direction"  : direction,
-        "unit"       : unit,
-        "chart"      : img,
+        "recent_avg": recent_avg,
+        "prior_avg" : prior_avg,
+        "pct_change": pct_change,
+        "direction" : direction,
+        "unit"      : unit,
+        "chart"     : _fig_to_img(fig),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 7: Weather-Normalized Anomaly Framework
+# ═══════════════════════════════════════════════════════════════════
+
+def compute_degree_days(temp_avg, base=COMFORT_BASE):
+    hdd = max(0, base - temp_avg)
+    cdd = max(0, temp_avg - base)
+    return hdd, cdd
+
+
+def build_single_customer_anomaly(df_div, df_temp, division="Electricity"):
+    """
+    Single-customer weather-normalized anomaly detection using rolling
+    HuberRegressor on Heating/Cooling Degree Day features.
+
+    Returns a DataFrame with residual z-scores, CI bands, and anomaly flags.
+    Requires at least MIN_HISTORY_PERIODS periods after temperature matching.
+    """
+    df = df_div[df_div["consumption"] > 0].copy().sort_values("mr_date").reset_index(drop=True)
+
+    # Build period-level HDD/CDD features
+    period_data = []
+    for _, row in df.iterrows():
+        end_date   = row["mr_date"]
+        start_date = end_date - pd.Timedelta(days=int(row["days"]))
+        mask       = (df_temp.index >= start_date) & (df_temp.index <= end_date)
+        temp_slice = df_temp.loc[mask]
+        if temp_slice.empty:
+            continue
+        temp_avg    = temp_slice["temp_avg"].mean()
+        hdd, cdd    = compute_degree_days(temp_avg)
+        period_data.append({
+            "mr_date"  : end_date,
+            "kwh"      : row["consumption"],
+            "days"     : row["days"],
+            "daily_kwh": row["consumption"] / row["days"],
+            "temp_avg" : temp_avg,
+            "hdd"      : hdd,
+            "cdd"      : cdd,
+        })
+
+    df_acc = pd.DataFrame(period_data)
+    if len(df_acc) < MIN_HISTORY_PERIODS:
+        return pd.DataFrame()
+
+    df_acc = df_acc.sort_values("mr_date").reset_index(drop=True)
+    rows   = []
+
+    for i in range(MIN_HISTORY_PERIODS, len(df_acc)):
+        hist    = df_acc.iloc[:i]
+        current = df_acc.iloc[i]
+        X_hist  = hist[["hdd", "cdd"]].values
+        y_hist  = hist["daily_kwh"].values
+        X_curr  = np.array([[current["hdd"], current["cdd"]]])
+
+        model = HuberRegressor(epsilon=1.35)
+        model.fit(X_hist, y_hist)
+
+        predicted      = model.predict(X_curr)[0]
+        residual       = current["daily_kwh"] - predicted
+        hist_residuals = y_hist - model.predict(X_hist)
+        resid_std      = np.std(hist_residuals) if np.std(hist_residuals) > 0 else 1
+        resid_z        = residual / resid_std
+        n              = len(hist)
+        se_pred        = resid_std * np.sqrt(1 + 1 / n)
+
+        rows.append({
+            "mr_date"        : current["mr_date"],
+            "actual_daily"   : current["daily_kwh"],
+            "predicted_daily": predicted,
+            "residual"       : residual,
+            "residual_z"     : resid_z,
+            "ci_lower"       : predicted - 1.96 * se_pred,
+            "ci_upper"       : predicted + 1.96 * se_pred,
+            "temp_avg"       : current["temp_avg"],
+            "hdd"            : current["hdd"],
+            "cdd"            : current["cdd"],
+        })
+
+    df_out = pd.DataFrame(rows)
+    if df_out.empty:
+        return df_out
+
+    df_out["anomaly_high"] = df_out["residual_z"] >  RESIDUAL_Z_THRESHOLD
+    df_out["anomaly_low"]  = df_out["residual_z"] < -RESIDUAL_Z_THRESHOLD
+    df_out["anomaly"]      = df_out["anomaly_high"] | df_out["anomaly_low"]
+
+    df_out["persistent_high"] = (
+        df_out["anomaly_high"].rolling(PERSISTENCE_PERIODS).sum() >= PERSISTENCE_PERIODS
+    )
+    df_out["persistent_low"] = (
+        df_out["anomaly_low"].rolling(PERSISTENCE_PERIODS).sum() >= PERSISTENCE_PERIODS
+    )
+    df_out["persistent"] = df_out["persistent_high"] | df_out["persistent_low"]
+
+    return df_out
+
+
+def plot_weather_anomaly(df_anomaly, title_prefix="", unit="kWh"):
+    """
+    Two-panel chart:
+      Top    — Actual vs Predicted daily usage with 95% CI band
+      Bottom — Residual Z-score bars colored by status
+    """
+    if df_anomaly.empty:
+        return None
+
+    df     = df_anomaly.sort_values("mr_date")
+    normal = df[~df["anomaly"]]
+    high   = df[df["anomaly_high"]]
+    low    = df[df["anomaly_low"]]
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
+
+    # Top: actual vs predicted
+    ax1.fill_between(df["mr_date"], df["ci_lower"], df["ci_upper"],
+                     alpha=0.2, color="steelblue", label="95% CI")
+    ax1.plot(df["mr_date"], df["predicted_daily"], color="steelblue",
+             linewidth=2, linestyle="--", label="Weather-Predicted")
+    ax1.scatter(normal["mr_date"], normal["actual_daily"],
+                color="gray", s=50, zorder=5, label="Normal")
+    ax1.scatter(high["mr_date"], high["actual_daily"],
+                color="crimson", s=90, zorder=6, label="High Anomaly", marker="^")
+    ax1.scatter(low["mr_date"],  low["actual_daily"],
+                color="dodgerblue", s=90, zorder=6, label="Low Anomaly", marker="v")
+    ax1.set_title(f"{title_prefix} — Weather-Normalized Anomaly Detection (HDD/CDD Regression)")
+    ax1.set_ylabel(f"{unit}/day")
+    ax1.legend(fontsize=8, loc="upper left")
+
+    # Bottom: residual z-scores
+    bar_colors = [
+        "crimson"    if z >  RESIDUAL_Z_THRESHOLD else
+        "dodgerblue" if z < -RESIDUAL_Z_THRESHOLD else
+        "gray"
+        for z in df["residual_z"]
+    ]
+    ax2.bar(df["mr_date"], df["residual_z"], width=20, color=bar_colors, alpha=0.75)
+    ax2.axhline( RESIDUAL_Z_THRESHOLD, color="crimson",    linestyle="--", linewidth=1.5,
+                 label=f"+{RESIDUAL_Z_THRESHOLD}σ")
+    ax2.axhline(-RESIDUAL_Z_THRESHOLD, color="dodgerblue", linestyle="--", linewidth=1.5,
+                 label=f"-{RESIDUAL_Z_THRESHOLD}σ")
+    ax2.axhline(0, color="black", linewidth=0.8)
+    ax2.set_title("Residual Z-Score  (weather-adjusted deviation from predicted)")
+    ax2.set_ylabel("Z-Score")
+    ax2.legend(fontsize=8)
+
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    return _fig_to_img(fig)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Section 7.4 — Auditor Action List
+# ─────────────────────────────────────────────────────────────────
+
+def generate_auditor_action_list(df_anomaly, customer_name="", account="", unit="kWh"):
+    """
+    Generate a prioritized auditor action list from single-customer
+    weather-normalized anomaly results.
+
+    Priority levels:
+      🔴 HIGH   — Persistent anomaly |z| > 4
+      🟠 MEDIUM — Persistent anomaly |z| 2.5–4  OR  5+ historical high periods
+      🟡 REVIEW — Single-period anomaly |z| > 3
+      ✅ NORMAL — No flags detected
+    """
+    if df_anomaly.empty:
+        return []
+
+    latest  = df_anomaly.sort_values("mr_date").iloc[-1]
+    n_high  = int(df_anomaly["anomaly_high"].sum())
+    n_low   = int(df_anomaly["anomaly_low"].sum())
+
+    z         = latest["residual_z"]
+    actual    = latest["actual_daily"]
+    predicted = latest["predicted_daily"]
+    last_read = latest["mr_date"].strftime("%Y-%m-%d")
+
+    actions = []
+
+    # ── 🔴 HIGH ──────────────────────────────────────────────────
+    if latest["persistent_high"] and z > 4:
+        actions.append({
+            "priority"         : "🔴 HIGH",
+            "issue"            : "Extreme Persistent High Usage",
+            "detail"           : f"Using {actual:.1f} {unit}/day vs {predicted:.1f} predicted",
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "Schedule site visit — check HVAC, water heater, insulation",
+            "potential_savings": f"{(actual - predicted) * 30:.0f} {unit}/month",
+        })
+    elif latest["persistent_low"] and z < -4:
+        actions.append({
+            "priority"         : "🔴 HIGH",
+            "issue"            : "Extreme Persistent Low Usage",
+            "detail"           : f"Using {actual:.1f} {unit}/day vs {predicted:.1f} predicted",
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "Verify meter function — check for vacancy or solar install",
+            "potential_savings": "N/A — verify meter",
+        })
+
+    # ── 🟠 MEDIUM ────────────────────────────────────────────────
+    elif latest["persistent_high"] and 2.5 < z <= 4:
+        actions.append({
+            "priority"         : "🟠 MEDIUM",
+            "issue"            : "Elevated Usage Pattern",
+            "detail"           : f"Using {actual:.1f} {unit}/day vs {predicted:.1f} predicted",
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "Phone consultation — discuss usage patterns, HVAC maintenance",
+            "potential_savings": f"{(actual - predicted) * 30:.0f} {unit}/month",
+        })
+    elif latest["persistent_low"] and -4 <= z < -2.5:
+        actions.append({
+            "priority"         : "🟠 MEDIUM",
+            "issue"            : "Persistent Low Usage",
+            "detail"           : f"Using {actual:.1f} {unit}/day vs {predicted:.1f} predicted",
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "Verify occupancy status — confirm meter accuracy",
+            "potential_savings": "N/A",
+        })
+
+    # Recurring historical pattern (not currently persistent)
+    if n_high >= 5 and not latest["persistent_high"]:
+        actions.append({
+            "priority"         : "🟠 MEDIUM",
+            "issue"            : "Recurring High Usage Events",
+            "detail"           : f"{n_high} high anomaly periods in history",
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "Review full billing history — identify seasonal equipment issues",
+            "potential_savings": "Varies",
+        })
+
+    # ── 🟡 REVIEW ────────────────────────────────────────────────
+    if latest["anomaly_high"] and not latest["persistent_high"] and z > 3:
+        actions.append({
+            "priority"         : "🟡 REVIEW",
+            "issue"            : "Recent Single-Period High Usage",
+            "detail"           : f"Spike: {actual:.1f} {unit}/day  (z = {z:.2f})",
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "Monitor next billing period — may self-resolve",
+            "potential_savings": "TBD",
+        })
+
+    # ── ✅ NORMAL ─────────────────────────────────────────────────
+    if not actions:
+        actions.append({
+            "priority"         : "✅ NORMAL",
+            "issue"            : "No anomalies detected",
+            "detail"           : (
+                f"Latest z-score: {z:.2f}  |  "
+                f"{n_high} historical high periods, {n_low} historical low periods"
+            ),
+            "z_score"          : round(z, 2),
+            "last_read"        : last_read,
+            "action"           : "No action required — usage consistent with weather patterns",
+            "potential_savings": "—",
+        })
+
+    return actions
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -748,32 +1070,31 @@ def compute_year_over_year(df_div):
 # ═══════════════════════════════════════════════════════════════════
 
 st.title("⚡ GRU Energy Audit Analyzer")
-st.caption("Energy & Water Savings Plan — Internal Analysis Tool")
+st.caption("Energy & Water Savings Plan  |  Internal Analysis Tool  |  2026")
 
 tab_meter, tab_ami = st.tabs(["📊 Meter Reading Analysis", "🔬 AMI Interval Analysis"])
 
 
-# ─────────────────────────────────────────────────────────────────
-# TAB 1: METER READING ANALYSIS
-# ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# TAB 1 — METER READING ANALYSIS
+# ═══════════════════════════════════════════════════════════════════
 with tab_meter:
     st.header("Meter Reading Analysis")
     uploaded = st.file_uploader(
         "Upload a GRU Customer Excel file (.xlsx)",
         type=["xlsx"],
         key="meter_upload",
+        help=(
+            "File must contain a Consumption (or Consumption History) sheet. "
+            "Optionally include a Master Sheet for customer info."
+        ),
     )
 
     if uploaded:
-        # ── Load file ─────────────────────────────────────────────
         with st.spinner("Loading and processing file…"):
             file_bytes = uploaded.read()
-
-            # Master Sheet info
-            info = get_master_sheet_info(io.BytesIO(file_bytes))
-
-            # Meter loader
-            loader = MeterLoader(io.BytesIO(file_bytes))
+            info       = get_master_sheet_info(io.BytesIO(file_bytes))
+            loader     = MeterLoader(io.BytesIO(file_bytes))
             try:
                 loader.load_and_clean()
             except Exception as e:
@@ -788,18 +1109,18 @@ with tab_meter:
         if info:
             st.subheader("👤 Customer Information")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Customer", info.get("customer_name") or "—")
-            c2.metric("Account",  info.get("account")       or "—")
-            c3.metric("Address",  info.get("address")       or "—")
-            c4.metric("GRU Rep",  info.get("gru_rep")       or "—")
+            c1.metric("Customer",    info.get("customer_name")   or "—")
+            c2.metric("Account",     info.get("account")         or "—")
+            c3.metric("Address",     info.get("address")         or "—")
+            c4.metric("GRU Rep",     info.get("gru_rep")         or "—")
             c5, c6, c7, c8 = st.columns(4)
-            c5.metric("Own / Rent",   info.get("own_rent")       or "—")
-            c6.metric("Community",    info.get("community")       or "—")
-            c7.metric("Survey Date",  info.get("survey_date")     or "—")
-            c8.metric("Results To",   info.get("results_sent_to") or "—")
+            c5.metric("Own / Rent",  info.get("own_rent")        or "—")
+            c6.metric("Community",   info.get("community")       or "—")
+            c7.metric("Survey Date", info.get("survey_date")     or "—")
+            c8.metric("Results To",  info.get("results_sent_to") or "—")
             st.divider()
 
-        # ── Division selector ─────────────────────────────────────
+        # ── Division Selector ─────────────────────────────────────
         available_divs = []
         if not df_elec.empty:  available_divs.append("Electricity")
         if not df_water.empty: available_divs.append("Water")
@@ -810,50 +1131,52 @@ with tab_meter:
             st.stop()
 
         division = st.selectbox("Select Division to Analyze", available_divs)
+        df_div   = {"Electricity": df_elec, "Water": df_water, "Gas": df_gas}[division]
+        name     = info.get("customer_name", "") if info else ""
+        prefix   = f"{name} — {division}" if name else division
 
-        df_div = {"Electricity": df_elec, "Water": df_water, "Gas": df_gas}[division]
-
-        # ── Compute features ──────────────────────────────────────
         with st.spinner("Computing features…"):
             feats  = MeterFeatures(df_div).compute_features()
-            name   = info.get("customer_name", "") if info else ""
-            prefix = f"{name} — {division}" if name else division
             graphs = MeterGraphs(feats, title_prefix=prefix)
+        unit = feats["unit"]
 
-        # ── Summary metrics ───────────────────────────────────────
+        # ── Summary Metrics ───────────────────────────────────────
         st.subheader(f"📈 {division} Summary")
         m1, m2, m3, m4, m5 = st.columns(5)
-        unit = feats["unit"]
-        m1.metric("Total Consumption", f"{feats['total_consumption']:,.1f} {unit}")
-        m2.metric("Daily Average",     f"{feats['overall_daily_avg']:.2f} {unit}/day" if feats["overall_daily_avg"] else "N/A")
-        m3.metric("Peak Period",       f"{feats['peak_consumption']:,.1f} {unit}")
-        m4.metric("Anomalies",         feats["n_anomalies"])
-        m5.metric("Data Quality",      f"{feats['quality_score']}/100")
-
+        m1.metric("Total Consumption",
+                  f"{feats['total_consumption']:,.1f} {unit}")
+        m2.metric("Daily Average",
+                  f"{feats['overall_daily_avg']:.2f} {unit}/day" if feats["overall_daily_avg"] else "N/A")
+        m3.metric("Peak Period",
+                  f"{feats['peak_consumption']:,.1f} {unit}")
+        m4.metric("Anomalies (IF)",      feats["n_anomalies"])
+        m5.metric("Data Quality Score",  f"{feats['quality_score']}/100")
         st.divider()
 
-        # ── Charts: Meter Reading ─────────────────────────────────
+        # ── Consumption Charts ────────────────────────────────────
         st.subheader("📊 Consumption Charts")
-
         st.image(graphs.plot_consumption(), use_container_width=True)
-
         img_daily = graphs.plot_daily_average()
         if img_daily:
             st.image(img_daily, use_container_width=True)
-
         st.image(graphs.plot_rolling_average(), use_container_width=True)
+        st.divider()
 
-        # ── Anomaly Detection ─────────────────────────────────────
-        st.subheader("🚨 Anomaly Detection")
+        # ── Isolation Forest Anomaly Detection ───────────────────
+        st.subheader("🚨 Anomaly Detection — Isolation Forest")
+        st.caption(
+            "Isolation Forest flags periods that are statistically unusual based on "
+            "consumption, days, and daily average — without accounting for weather. "
+            "The weather-normalized model in Section 7 (below) is more precise."
+        )
         anomaly_img, anomaly_df = graphs.plot_anomalies()
         st.image(anomaly_img, use_container_width=True)
         if not anomaly_df.empty:
-            cols = [c for c in ["mr_date", "mr_reason", "mr_type", "days", "consumption", "avg_daily"]
-                    if c in anomaly_df.columns]
+            cols = [c for c in ["mr_date", "mr_reason", "mr_type", "days",
+                                "consumption", "avg_daily"] if c in anomaly_df.columns]
             st.dataframe(anomaly_df[cols].reset_index(drop=True), use_container_width=True)
         else:
-            st.success("No anomalous periods detected.")
-
+            st.success("✅ No anomalous periods flagged by Isolation Forest.")
         st.divider()
 
         # ── Year-over-Year ────────────────────────────────────────
@@ -863,16 +1186,24 @@ with tab_meter:
             y1, y2, y3 = st.columns(3)
             y1.metric("Recent 12-Mo Daily Avg", f"{yoy['recent_avg']:.2f} {yoy['unit']}/day")
             y2.metric("Prior 12-Mo Daily Avg",  f"{yoy['prior_avg']:.2f} {yoy['unit']}/day")
-            y3.metric("Change", f"{yoy['pct_change']:+.1f}%  {yoy['direction']}")
+            y3.metric("YoY Change", f"{yoy['pct_change']:+.1f}%  {yoy['direction']}")
             st.image(yoy["chart"], use_container_width=True)
         else:
-            st.info("Not enough data for year-over-year comparison (need 2+ years).")
-
+            st.info("Insufficient data for year-over-year comparison (requires 2+ years).")
         st.divider()
 
         # ── Temperature Correlation ───────────────────────────────
-        st.subheader("🌡️ Temperature Correlation (Gainesville FL)")
-        with st.spinner("Fetching weather data and computing correlation…"):
+        st.subheader("🌡️ Temperature Correlation — Gainesville FL")
+        st.caption(
+            "**Electricity & Water** use a V-shape model: usage is correlated against "
+            "|temp − 65°F| (distance from comfort baseline), which captures both "
+            "summer cooling demand and winter heating demand in a single r value. "
+            "A low linear Pearson r is expected and normal for HVAC customers — "
+            "the two seasonal peaks cancel each other out in a linear model. "
+            "**Gas** uses a linear model (heating load rises as temperature drops)."
+        )
+
+        with st.spinner("Fetching weather data…"):
             df_temp = get_gainesville_temps(
                 str(df_div["mr_date"].min().date()),
                 str(df_div["mr_date"].max().date()),
@@ -881,30 +1212,149 @@ with tab_meter:
         if df_temp is not None:
             df_merged = merge_consumption_temp(df_div, df_temp)
             if not df_merged.empty:
-                st.image(plot_temp_overlay(df_merged, title_prefix=prefix),    use_container_width=True)
-                st.image(plot_temp_side_by_side(df_merged, title_prefix=prefix), use_container_width=True)
-                scatter_img, r_val, interp = plot_temp_scatter(df_merged, title_prefix=prefix, division=division)
+                st.image(plot_temp_overlay(df_merged, title_prefix=prefix),
+                         use_container_width=True)
+                scatter_img, r_val, interp = plot_temp_scatter(
+                    df_merged, title_prefix=prefix, division=division)
                 st.image(scatter_img, use_container_width=True)
-                st.info(f"**Correlation: {r_val:.2f}** — {interp}")
+                st.info(f"**Primary correlation: {r_val:.2f}** — {interp}")
             else:
                 st.warning("No overlapping temperature/consumption data found.")
         else:
-            st.warning("Could not fetch temperature data. Check your internet connection.")
+            st.warning("Could not fetch temperature data. Check internet connection.")
+        st.divider()
+
+        # ── Cross-Utility Correlation ─────────────────────────────
+        st.subheader("🔗 Cross-Utility Seasonal Correlation")
+        st.caption(
+            "Normalized daily usage for all available divisions on one axis. "
+            "Useful for spotting whether electricity and gas move together "
+            "(resistance or dual-fuel heating) or inversely (gas winter / electric summer). "
+            "Pairwise Pearson r computed on monthly averages."
+        )
+        overlay_img, pairs = plot_cross_utility_correlation(
+            df_elec, df_water, df_gas, name=name)
+        if overlay_img:
+            st.image(overlay_img, use_container_width=True)
+            if pairs:
+                pair_cols = st.columns(len(pairs))
+                for col_r, (label, r) in zip(pair_cols, pairs.items()):
+                    col_r.metric(label, f"r = {r:.3f}")
+                st.caption(
+                    "r > 0.7 = strong co-movement  |  "
+                    "r near 0 = independent seasonal patterns  |  "
+                    "r < −0.4 = inverse seasonal pattern (e.g. gas peaks in winter, electric in summer)"
+                )
+        else:
+            st.info("Cross-utility correlation requires at least two divisions with data in this file.")
+        st.divider()
+
+        # ── Section 7: Weather-Normalized Anomaly Framework ──────
+        st.subheader("🧠 Weather-Normalized Anomaly Detection (Section 7)")
+        st.caption(
+            "Trains a rolling **HuberRegressor** (robust to outliers) on Heating Degree Days "
+            "and Cooling Degree Days to predict expected usage for each billing period. "
+            f"Periods where actual usage deviates more than **±{RESIDUAL_Z_THRESHOLD}σ** "
+            "from the weather-adjusted prediction are flagged. "
+            f"**Persistent anomalies** ({PERSISTENCE_PERIODS}+ consecutive flagged periods) "
+            "are escalated in the Auditor Action List below."
+        )
+
+        if df_temp is not None:
+            with st.spinner("Running weather-normalized anomaly model…"):
+                df_anomaly_wn = build_single_customer_anomaly(df_div, df_temp, division=division)
+
+            if not df_anomaly_wn.empty:
+                n_high_wn = int(df_anomaly_wn["anomaly_high"].sum())
+                n_low_wn  = int(df_anomaly_wn["anomaly_low"].sum())
+                n_pers_wn = int(df_anomaly_wn["persistent"].sum())
+
+                wn1, wn2, wn3, wn4 = st.columns(4)
+                wn1.metric("Periods Analyzed", len(df_anomaly_wn))
+                wn2.metric("High Anomalies",   n_high_wn)
+                wn3.metric("Low Anomalies",    n_low_wn)
+                wn4.metric("Persistent",       n_pers_wn)
+
+                wn_img = plot_weather_anomaly(df_anomaly_wn, title_prefix=prefix, unit=unit)
+                if wn_img:
+                    st.image(wn_img, use_container_width=True)
+
+                if n_high_wn > 0 or n_low_wn > 0:
+                    flagged = df_anomaly_wn[df_anomaly_wn["anomaly"]].copy()
+                    flagged["type"] = flagged.apply(
+                        lambda r: "🔴 High" if r["anomaly_high"] else "🔵 Low", axis=1)
+                    flagged["persistent?"] = flagged["persistent"].map({True: "Yes", False: "No"})
+                    display_cols = [
+                        "mr_date", "type", "actual_daily", "predicted_daily",
+                        "residual_z", "temp_avg", "hdd", "cdd", "persistent?",
+                    ]
+                    st.dataframe(
+                        flagged[display_cols].round(2).reset_index(drop=True),
+                        use_container_width=True,
+                    )
+                else:
+                    st.success("✅ No weather-normalized anomalies detected.")
+
+                st.divider()
+
+                # ── Auditor Action List ───────────────────────────
+                st.subheader("📋 Auditor Action List")
+                st.caption(
+                    "**🔴 HIGH** = Persistent extreme anomaly — immediate site visit recommended  |  "
+                    "**🟠 MEDIUM** = Persistent elevated or recurring pattern — schedule follow-up  |  "
+                    "**🟡 REVIEW** = Single-period spike — monitor next billing period  |  "
+                    "**✅ NORMAL** = Usage consistent with weather patterns"
+                )
+
+                actions = generate_auditor_action_list(
+                    df_anomaly_wn,
+                    customer_name=name,
+                    account=info.get("account", "") if info else "",
+                    unit=unit,
+                )
+
+                for act in actions:
+                    priority = act["priority"]
+                    with st.expander(
+                        f"{priority}  |  {act['issue']}  "
+                        f"|  z = {act['z_score']}  |  Last read: {act['last_read']}"
+                    ):
+                        col_a, col_b = st.columns(2)
+                        col_a.markdown(f"**Detail:** {act['detail']}")
+                        col_a.markdown(f"**Recommended Action:** {act['action']}")
+                        col_b.markdown(f"**Priority:** {priority}")
+                        col_b.markdown(f"**Potential Savings:** {act['potential_savings']}")
+
+            else:
+                st.info(
+                    f"Not enough temperature-matched data for weather-normalized analysis "
+                    f"(minimum {MIN_HISTORY_PERIODS} billing periods required). "
+                    f"The file may have too few reads or the temperature API may be unavailable "
+                    f"for the date range."
+                )
+        else:
+            st.warning("Weather-normalized analysis requires temperature data — check internet connection.")
 
         # ── Raw Data Viewer ───────────────────────────────────────
+        st.divider()
         with st.expander("🗂️ View Raw Meter Data"):
             st.dataframe(df_div, use_container_width=True)
 
 
-# ─────────────────────────────────────────────────────────────────
-# TAB 2: AMI ANALYSIS
-# ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# TAB 2 — AMI INTERVAL ANALYSIS
+# ═══════════════════════════════════════════════════════════════════
 with tab_ami:
     st.header("AMI 15-Minute Interval Analysis")
     ami_uploaded = st.file_uploader(
         "Upload a GRU AMI Excel file (.xlsx)",
         type=["xlsx"],
         key="ami_upload",
+        help=(
+            "Supports Electric, Water, and Gas AMI files. "
+            "Sheet name auto-detected (ELECTRIC, Electric, Sheet1, WATER, GAS, etc.). "
+            "Timestamp formats with and without EST/EDT suffix are handled."
+        ),
     )
 
     if ami_uploaded:
@@ -917,20 +1367,22 @@ with tab_ami:
                 st.error(f"❌ Could not load AMI data: {e}")
                 st.stop()
 
-            unit      = ami_loader.unit
-            util_type = ami_loader.util_type
-            ami_feats = AMIFeatures(df_ami).compute()
+            unit       = ami_loader.unit
+            util_type  = ami_loader.util_type
+            ami_feats  = AMIFeatures(df_ami).compute()
             ami_graphs = AMIGraphs(ami_feats, title_prefix=util_type, unit=unit)
 
-        # ── AMI Summary metrics ───────────────────────────────────
+        # ── AMI Summary ───────────────────────────────────────────
         st.subheader(f"⚡ AMI Summary — {util_type}")
         a1, a2, a3, a4, a5 = st.columns(5)
-        a1.metric("Interval",      f"{ami_feats['interval_minutes']} min")
-        a2.metric("Base Load",     f"{ami_feats['base_load_kw']:.3f} kW")
-        a3.metric("Peak Demand",   f"{ami_feats['peak_kw']:.3f} kW")
-        a4.metric("Daily Avg",     f"{ami_feats['daily_avg_kwh']:.2f} {unit}/day")
-        a5.metric("Peak Day",      str(ami_feats["peak_day"].date()))
-
+        a1.metric("Interval",    f"{ami_feats['interval_minutes']} min")
+        a2.metric("Base Load",   f"{ami_feats['base_load_kw']:.3f} kW")
+        a3.metric("Peak Demand", f"{ami_feats['peak_kw']:.3f} kW")
+        a4.metric("Daily Avg",   f"{ami_feats['daily_avg_kwh']:.2f} {unit}/day")
+        a5.metric("Peak Day",    str(ami_feats["peak_day"].date()))
+        a6, a7 = st.columns(2)
+        a6.metric("Date Range Start", str(df_ami["timestamp"].min().date()))
+        a7.metric("Date Range End",   str(df_ami["timestamp"].max().date()))
         st.divider()
 
         # ── AMI Charts ────────────────────────────────────────────
@@ -942,11 +1394,15 @@ with tab_ami:
 
         st.subheader("📊 Hourly Load Profile")
         st.image(ami_graphs.plot_hourly_profile(), use_container_width=True)
-
         st.divider()
 
         # ── AMI Temperature Correlation ───────────────────────────
-        st.subheader("🌡️ AMI Temperature Correlation")
+        st.subheader("🌡️ AMI Temperature Correlation — Gainesville FL")
+        st.caption(
+            "V-shape model (|temp − 65°F|) for Electricity/Water. "
+            "Linear model for Gas. Same methodology as meter reading analysis."
+        )
+
         ami_daily         = ami_feats["daily_series"].reset_index()
         ami_daily.columns = ["date", "kwh"]
         ami_daily["date"] = pd.to_datetime(ami_daily["date"])
@@ -959,7 +1415,7 @@ with tab_ami:
 
         if df_temp_ami is not None:
             df_ami_temp = ami_daily.merge(
-                df_temp_ami.reset_index().rename(columns={"index": "date", "date": "date"}),
+                df_temp_ami.reset_index(),
                 on="date", how="inner",
             ).dropna(subset=["temp_avg"])
 
@@ -968,25 +1424,37 @@ with tab_ami:
                     df_ami_temp["temp_delta"] = df_ami_temp["temp_avg"]
                     xlabel  = "Avg Temperature (°F) — expect negative for heating load"
                     r_label = "Linear r"
+                    r = df_ami_temp["kwh"].corr(df_ami_temp["temp_delta"])
+                    interp = (
+                        "Strong heating load — usage rises as temperature drops." if r < -0.6
+                        else "Moderate heating relationship." if r < -0.3
+                        else "Weak heating relationship — gas may serve multiple end uses."
+                    )
                 else:
-                    df_ami_temp["temp_delta"] = (df_ami_temp["temp_avg"] - 65).abs()
-                    xlabel  = "|Temperature − 65°F| (deviation from comfort baseline)"
+                    df_ami_temp["temp_delta"] = (df_ami_temp["temp_avg"] - COMFORT_BASE).abs()
+                    xlabel  = "|Temperature − 65°F|  (V-shape: distance from comfort baseline)"
                     r_label = "V-shape r"
+                    r = df_ami_temp["kwh"].corr(df_ami_temp["temp_delta"])
+                    interp = (
+                        "Very strong HVAC relationship." if r > 0.7
+                        else "Moderate HVAC relationship." if r > 0.5
+                        else "Weak HVAC relationship." if r > 0.3
+                        else "Minimal temperature sensitivity."
+                    )
 
-                r = df_ami_temp["kwh"].corr(df_ami_temp["temp_delta"])
-
-                def season(temp):
+                def season_color(temp):
                     if temp >= 80: return "#f76f6f"
                     if temp <= 55: return "#4f8ef7"
                     return "#3ecf8e"
 
-                colors = [season(t) for t in df_ami_temp["temp_avg"]]
-                fig, ax = plt.subplots(figsize=(8, 5))
+                colors = [season_color(t) for t in df_ami_temp["temp_avg"]]
+                fig, ax = plt.subplots(figsize=(9, 5))
                 ax.scatter(df_ami_temp["temp_delta"], df_ami_temp["kwh"],
-                           c=colors, alpha=0.8, edgecolors="white", s=70, zorder=3)
-                z      = np.polyfit(df_ami_temp["temp_delta"], df_ami_temp["kwh"], 1)
-                x_line = np.linspace(df_ami_temp["temp_delta"].min(), df_ami_temp["temp_delta"].max(), 100)
-                ax.plot(x_line, np.poly1d(z)(x_line), color="darkorange",
+                           c=colors, alpha=0.85, edgecolors="white", s=70, zorder=3)
+                z_fit  = np.polyfit(df_ami_temp["temp_delta"], df_ami_temp["kwh"], 1)
+                x_line = np.linspace(df_ami_temp["temp_delta"].min(),
+                                     df_ami_temp["temp_delta"].max(), 100)
+                ax.plot(x_line, np.poly1d(z_fit)(x_line), color="darkorange",
                         linewidth=2, linestyle="--", label="Trend")
                 ax.legend(handles=[
                     mpatches.Patch(color="#f76f6f", label="Hot (>80°F)"),
@@ -999,26 +1467,13 @@ with tab_ami:
                 ax.set_ylabel(f"{unit}/day")
                 plt.tight_layout()
                 st.image(_fig_to_img(fig), use_container_width=True)
-
-                if util_type == "Gas":
-                    interp = (
-                        "Strong heating load. Gas usage rises significantly as temperature drops." if r < -0.6
-                        else "Moderate heating relationship." if r < -0.3
-                        else "Weak heating relationship. Gas may serve water heating or cooking too."
-                    )
-                else:
-                    interp = (
-                        "Very strong HVAC relationship." if r > 0.7
-                        else "Moderate HVAC relationship. Temperature clearly influences usage." if r > 0.5
-                        else "Weak HVAC relationship. Some temperature sensitivity." if r > 0.3
-                        else "Minimal temperature sensitivity."
-                    )
                 st.info(f"**{r_label} = {r:.2f}** — {interp}")
             else:
                 st.warning("No overlapping temperature/AMI data found.")
         else:
-            st.warning("Could not fetch temperature data. Check your internet connection.")
+            st.warning("Could not fetch temperature data. Check internet connection.")
 
         # ── Raw AMI Data ──────────────────────────────────────────
+        st.divider()
         with st.expander("🗂️ View Raw AMI Data (first 500 rows)"):
             st.dataframe(df_ami.head(500), use_container_width=True)
