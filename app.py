@@ -687,7 +687,7 @@ if page == "Single File Analysis":
 
                 t1, t2, t3, t4, t5, t6, t7 = st.tabs([
                     "Consumption", "Daily Avg", "Rolling Avg", "Anomalies",
-                    "Temp Overlay", "Scatter"
+                    "Temp Overlay", "Side-by-Side", "Scatter"
                 ])
 
                 with t1:
@@ -858,7 +858,7 @@ elif page == "AMI Analysis":
 
             t1, t2, t3, t4, t5, t6 = st.tabs([
                 "Load Shape", "Daily Totals", "Hourly Profile",
-                "Temp Overlay", "Scatter"
+                "Temp Overlay", "Side-by-Side", "Scatter"
             ])
 
             with t1:
