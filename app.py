@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Energy Audit Analyzer",
-    page_icon="⚡",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -633,9 +633,9 @@ with st.sidebar:
     st.markdown("## Energy Audit")
     st.markdown("---")
     page = st.radio("Navigation", [
-        "📊  Single File Analysis",
+        "Single File Analysis",
         #"📈  Year-over-Year",
-        "⚡  AMI Analysis",
+        "AMI Analysis",
     ], label_visibility="collapsed")
     st.markdown("---")
     st.caption("Daniel Quiroz")
@@ -645,8 +645,8 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────────
 # PAGE: SINGLE FILE ANALYSIS
 # ─────────────────────────────────────────────────────────────────
-if page == "📊  Single File Analysis":
-    st.title("📊 Single File Analysis")
+if page == "Single File Analysis":
+    st.title("Single File Analysis")
 
     uploaded = st.file_uploader("Upload Customer Meter File (.xlsx)", type=["xlsx"], key="meter")
 
@@ -835,8 +835,8 @@ elif page == "📈  Year-over-Year":
 # ─────────────────────────────────────────────────────────────────
 # PAGE: AMI ANALYSIS
 # ─────────────────────────────────────────────────────────────────
-elif page == "⚡  AMI Analysis":
-    st.title("⚡ AMI Analysis")
+elif page == "AMI Analysis":
+    st.title("AMI Analysis")
     st.markdown("Upload a 15-minute interval AMI file.")
 
     uploaded = st.file_uploader("Upload AMI Excel File (.xlsx)", type=["xlsx"], key="ami")
