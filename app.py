@@ -530,7 +530,8 @@ class AMILoader:
 
     def __init__(self, fileobj):
         self.fileobj = fileobj
-        self.df      = None
+        self.df = None
+        self.unit = None
 
     def _find_sheet(self, xl):
         for name in xl.sheet_names:
@@ -538,29 +539,79 @@ class AMILoader:
                 return name
         return xl.sheet_names[0]
 
+    def detect_unit(self, raw_series):
+        """
+        Detect whether the AMI file is electricity (Wh) or water (Kg).
+        """
+        sample = raw_series.astype(str).head(20).str.lower()
+
+        if sample.str.contains("kg").any():
+            return "kg"
+
+        if sample.str.contains("wh").any():
+            return "wh"
+
+        # fallback heuristic
+        numeric = pd.to_numeric(
+            sample.str.replace(",", "", regex=False).str.extract(r"([\d.]+)")[0],
+            errors="coerce"
+        )
+
+        if numeric.mean() > 2000:
+            return "wh"
+
+        return "kg"
+
     def load_and_clean(self):
-        xl    = pd.ExcelFile(self.fileobj)
+
+        xl = pd.ExcelFile(self.fileobj)
         sheet = self._find_sheet(xl)
-        df    = pd.read_excel(xl, sheet_name=sheet, header=None, skiprows=4)
-        df    = df[[0, 1]].copy()
-        df.columns = ["timestamp", "wh_raw"]
 
-        df["timestamp"] = (df["timestamp"].astype(str)
-                           .str.replace(r"\s+EST.*$", "", regex=True)
-                           .str.replace(r"\s+EDT.*$", "", regex=True)
-                           .str.strip())
-        df["timestamp"] = pd.to_datetime(df["timestamp"],
-                                         format="%b %d, %Y - %I:%M %p",
-                                         errors="coerce")
-        df["wh"]  = (df["wh_raw"].astype(str)
-                     .str.replace(",", "", regex=False)
-                     .str.extract(r"([\d.]+)")[0])
-        df["wh"]  = pd.to_numeric(df["wh"],  errors="coerce")
-        df["kwh"] = df["wh"] / 1000
+        df = pd.read_excel(xl, sheet_name=sheet, header=None, skiprows=4)
+        df = df[[0,1]].copy()
+        df.columns = ["timestamp","raw"]
 
-        df = df.dropna(subset=["timestamp", "kwh"])
-        df = df[df["kwh"] > 0]
+        # clean timestamp
+        df["timestamp"] = (
+            df["timestamp"].astype(str)
+            .str.replace(r"\s+EST.*$", "", regex=True)
+            .str.replace(r"\s+EDT.*$", "", regex=True)
+            .str.strip()
+        )
+
+        df["timestamp"] = pd.to_datetime(
+            df["timestamp"],
+            format="%b %d, %Y - %I:%M %p",
+            errors="coerce"
+        )
+
+        # detect unit
+        self.unit = self.detect_unit(df["raw"])
+
+        # extract numeric
+        df["value"] = (
+            df["raw"].astype(str)
+            .str.replace(",", "", regex=False)
+            .str.extract(r"([\d.]+)")[0]
+        )
+
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+
+        # convert electricity
+        if self.unit == "wh":
+            df["usage"] = df["value"] / 1000
+            self.unit = "kWh"
+
+        # water
+        else:
+            df["usage"] = df["value"]
+            self.unit = "Kg"
+
+        df = df.dropna(subset=["timestamp","usage"])
+        df = df[df["usage"] > 0]
+
         df = df.sort_values("timestamp").reset_index(drop=True)
+
         self.df = df
         return df
 
@@ -577,12 +628,12 @@ class AMIFeatures:
         deltas           = df["timestamp"].diff().dropna()
         interval         = deltas.mode()[0]
         interval_minutes = int(interval.total_seconds() / 60)
-        base_load        = df["kwh"].quantile(0.05)
+        base_load        = df["usage"].quantile(0.05)
         base_load_kw     = base_load / (interval_minutes / 60)
-        peak_kwh         = df["kwh"].max()
+        peak_kwh         = df["usage"].max()
         peak_kw          = peak_kwh / (interval_minutes / 60)
-        df["date"]       = df["timestamp"].dt.date
-        daily_series     = df.groupby("date")["kwh"].sum()
+        df["date"] = df["timestamp"].dt.date
+        daily_series = df.groupby("date")["usage"].sum()
         daily_avg_kwh    = daily_series.mean()
         peak_day         = daily_series.idxmax()
         df["hour"]       = df["timestamp"].dt.hour
@@ -845,8 +896,8 @@ elif page == "AMI Analysis":
         try:
             loader    = AMILoader(uploaded)
             df_ami    = loader.load_and_clean()
-            ami_feats = AMIFeatures(df_ami).compute()
-
+            unit = loader.unit
+          
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Interval",       f"{ami_feats['interval_minutes']} min")
             c2.metric("Base Load",      f"{ami_feats['base_load']:.3f} kWh",
@@ -871,7 +922,7 @@ elif page == "AMI Analysis":
                 ax.axhline(ami_feats["peak_kwh"],  color="#f76f6f", linewidth=1.5,
                            linestyle="--", label=f"Peak ({ami_feats['peak_kwh']:.3f} kWh)")
                 ax.set_title("AMI Load Shape — 15-Minute Intervals")
-                ax.set_ylabel("kWh")
+                ax.set_ylabel(unit)
                 ax.legend(facecolor=BG_CARD, edgecolor=BORDER, labelcolor=TXT_MAIN, fontsize=8)
                 fig.autofmt_xdate()
                 show_fig(fig)
